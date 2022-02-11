@@ -2,7 +2,8 @@ import './style.css'
 import * as THREE from 'three'
 import * as dat from 'lil-gui'
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader"
-import { ObjectLoader } from 'three'
+import starVertex from "./shaders/starVertex.glsl"
+import starFragment from "./shaders/starFragment.glsl"
 
 /**
  * Debug
@@ -43,8 +44,8 @@ objLoader.load("./earth.obj",
     function (object) {
         // console.log("LAODED", object)
         earth = object
-        // earth.position.set(1, 1, - 1)
-        // directionalLight.lookAt(earth)
+        earth.position.set(0, 0, 3.7)
+
         scene.add(object)
 
     },
@@ -93,6 +94,9 @@ window.addEventListener('resize', () => {
     // Update renderer
     renderer.setSize(sizes.width, sizes.height)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+
+    earth.updateMatrix()
+
 })
 
 /**
@@ -101,6 +105,7 @@ window.addEventListener('resize', () => {
 // Base camera
 const camera = new THREE.PerspectiveCamera(35, sizes.width / sizes.height, 0.1, 100)
 camera.position.z = 6
+
 scene.add(camera)
 
 /**
@@ -112,7 +117,18 @@ const renderer = new THREE.WebGLRenderer({
 renderer.setSize(sizes.width, sizes.height)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 
-
+/**
+ * SHADERS PARICALES
+ */
+const particalGeometry = new THREE.PlaneBufferGeometry(1, 1, 32, 32)
+const particalMaterial = new THREE.RawShaderMaterial({
+    vertexShader: starVertex,
+    fragmentShader: starFragment,
+    wireframe: true
+})
+const star = new THREE.Mesh(particalGeometry, particalMaterial)
+scene.add(star)
+/************ */
 const scrollParams = {
     currentSection: 0,
     phase: 0,
@@ -121,7 +137,9 @@ const scrollParams = {
     oldScrollPosY: 0,
     direction: "bot",
     inViewSection: 0,
-    travelledDistance: 0
+    travelledDistance: 0,
+    globalScrollFactor: 0,
+    lastScroll: 0
 }
 const earthParams = {
     infiniteRotation: true,
@@ -131,6 +149,10 @@ const earthParams = {
         y: 0,
         z: 0
     },
+    rotation: {
+        x: 0,
+        directionX: 'forward'
+    },
     xPos: 0,
     yPos: 0,
     durationStick: 3
@@ -139,28 +161,15 @@ const earthParams = {
 /**
  * WINDOW EVENTS LISTENER
  */
-const sections = []
-var winX = null;
-var winY = null;
-function disableWindowScroll () {
-    winX = window.scrollX;
-    winY = window.scrollY;
-}
 
-function enableWindowScroll () {
-    winX = null;
-    winY = null;
-}
 window.addEventListener("scroll", (event) => {
-    if (winX !== null && winY !== null) {
-        window.scrollTo(winX, winY);
-    }
-    // console.log(window.scrol)
+
+    scrollParams.lastScroll = Date.now()
+    scrollParams.globalScrollFactor = window.scrollY / (sizes.height * 2)
     scrollParams.direction = window.scrollY > scrollParams.oldScrollPosY ? "bot" : "top"
     scrollParams.oldScrollPosY = window.scrollY
     const newSection = Math.round(window.scrollY / sizes.height)
     scrollParams.inViewSection = ((window.scrollY / sizes.height) - Math.floor(window.scrollY / sizes.height)).toFixed(3)
-    // console.log(scrollParams.inViewSection, scrollParams.phase)
     scrollParams.currentSection = newSection
 
     // if (newSection) {
@@ -192,12 +201,31 @@ window.addEventListener("scroll", (event) => {
     // }
 
     // console.log(travelledDistance)
+    // console.log(camera.position.x)
+
 })
 
 
 /**
  * Animate
  */
+// function rotateAboutPoint (obj, point, axis, theta, pointIsWorld) {
+//     pointIsWorld = (pointIsWorld === undefined) ? false : pointIsWorld;
+
+//     if (pointIsWorld) {
+//         obj.parent.localToWorld(obj.position); // compensate for world coordinate
+//     }
+
+//     obj.position.sub(point); // remove the offset
+//     obj.position.applyAxisAngle(axis, theta); // rotate the POSITION
+//     obj.position.add(point); // re-add the offset
+
+//     if (pointIsWorld) {
+//         obj.parent.worldToLocal(obj.position); // undo world coordinates compensation
+//     }
+
+//     obj.rotateOnAxis(axis, theta); // rotate the OBJECT
+// }
 const clock = new THREE.Clock()
 let time = Date.now()
 const tick = () => {
@@ -205,18 +233,25 @@ const tick = () => {
 
     const currentTime = Date.now()
     const deltaTime = currentTime - time
-    // console.log(deltaTime)
-    let speed = 1
-    if (earth && earthParams.infiniteRotation) {
-        earth.rotation.y = elapsedTime * speed
+    // let speed = 1
+    // if (earth && earthParams.infiniteRotation) {
+    //     earth.rotation.y = elapsedTime * speed
 
+    // }
+    if (earthParams.rotation.directionX === "forward") {
+        earthParams.rotation.x += 0.001
+    } else if (earthParams.rotation.directionX === "backward") {
+        earthParams.rotation.x -= 0.001
     }
-    // console.log(scrollParams.inViewSection)
-    let scaleCoef = 1 + (1 * scrollParams.inViewSection)
-    // console.log(scrollParams.inViewSection)
+
+    if (earthParams.rotation.x >= 0.2) {
+        earthParams.rotation.directionX = "backward"
+    } else if (earthParams.rotation.x <= - 0.2) {
+        earthParams.rotation.directionX = "forward"
+    }
+    // let scaleCoef = 1 + (1 * scrollParams.inViewSection)
     if (earth) {
         let offsetTransform = 0
-        // console.log(earth.position.x)
         switch (scrollParams.phase) {
             case 1:
 
@@ -255,12 +290,31 @@ const tick = () => {
             default:
                 break;
         }
-        // earth.position.x = -earthParams.xPos
-        // earth.position.z = -earthParams.xPos * 2
-        earth.position.x = scrollParams.currentSection % 2 === 0 ? earthParams.xPos : - earthParams.xPos
-        earth.position.z = earthParams.xPos
-        earth.scale.set(earthParams.xPos * 1.5, earthParams.xPos * 1.5, earthParams.xPos * 1.5)
-        earth.rotation.y = elapsedTime * speed * earthParams.xPos * 2
+        /**
+         * earth animation 1
+         * earth.position.x = scrollParams.currentSection % 2 === 0 ? earthParams.xPos : - earthParams.xPos
+         * earth.position.z = earthParams.xPos
+         * earth.scale.set(earthParams.xPos * 1.5, earthParams.xPos * 1.5, earthParams.xPos * 1.5)
+         * earth.rotation.y = elapsedTime * speed * earthParams.xPos * 2
+         */
+        earth.rotation.x = earthParams.rotation.x
+        earth.rotation.y = Math.cos(Math.PI * scrollParams.globalScrollFactor) * 6
+        earth.children.forEach((mesh) => {
+            switch (mesh.name) {
+                case "Mundo_Tierra":
+                    mesh.material.color = new THREE.Color(1, 1, 1)
+                    break;
+
+                default:
+                    mesh.material.color = new THREE.Color(scrollParams.globalScrollFactor * 0.1, scrollParams.globalScrollFactor * 0.1, scrollParams.globalScrollFactor)
+
+                    break;
+            }
+        });
+        camera.position.x = (Math.sin(Math.PI * scrollParams.globalScrollFactor)) * -1
+        camera.position.y = Math.sin(Math.PI * scrollParams.globalScrollFactor) * 0.8
+        camera.position.z = 6 + (4 * (scrollParams.globalScrollFactor))
+
 
     }
     // Render
